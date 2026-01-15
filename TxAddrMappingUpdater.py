@@ -4,6 +4,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 
+from sqlalchemy import text
 from dbsession import session_maker
 from helper import KeyValueStore
 from models.TxAddrMapping import TxAddrMapping
@@ -42,12 +43,12 @@ class TxAddrMappingUpdater(object):
             with session_maker() as s:
                 max_in = min(self.id_counter_inputs + LIMIT,
                              s.execute(
-                                 f"""SELECT id FROM transactions_inputs ORDER by id DESC LIMIT 1""")
+                                 text("""SELECT id FROM transactions_inputs ORDER by id DESC LIMIT 1"""))
                              .scalar() or 0)
 
                 max_out = min(self.id_counter_outputs + LIMIT,
                               s.execute(
-                                  f"""SELECT id FROM transactions_outputs ORDER by id DESC LIMIT 1""")
+                                  text("""SELECT id FROM transactions_outputs ORDER by id DESC LIMIT 1"""))
                               .scalar() or 0)
 
             try:
@@ -90,13 +91,13 @@ class TxAddrMappingUpdater(object):
 
     def get_last_block_time(self, start_block_time):
         with session_maker() as s:
-            result = s.execute(f"""SELECT
+            result = s.execute(text(f"""SELECT
                 transactions.block_time
-                
+
                 FROM transactions
                 WHERE transactions.block_time >= :blocktime
                  ORDER by transactions.block_time ASC
-                 LIMIT {LIMIT}""", {"blocktime": start_block_time}).all()
+                 LIMIT {LIMIT}"""), {"blocktime": start_block_time}).all()
 
         try:
             return result[-1][0]
@@ -106,26 +107,26 @@ class TxAddrMappingUpdater(object):
     def update_inputs(self, min_id: int, max_id: int):
         with session_maker() as s:
 
-            result = s.execute(f"""INSERT INTO tx_id_address_mapping (transaction_id, address, block_time)
+            result = s.execute(text("""INSERT INTO tx_id_address_mapping (transaction_id, address, block_time)
 
                 SELECT DISTINCT * FROM (
                     SELECT transactions_inputs.transaction_id,
                            transactions_outputs.script_public_key_address,
-                           transactions.block_time FROM transactions_inputs 
-                    LEFT JOIN transactions_outputs ON 
-                    
+                           transactions.block_time FROM transactions_inputs
+                    LEFT JOIN transactions_outputs ON
+
                         transactions_outputs.transaction_id = transactions_inputs.previous_outpoint_hash AND
                         transactions_outputs.index = transactions_inputs.previous_outpoint_index
-                    
+
                     LEFT JOIN transactions ON transactions.transaction_id = transactions_inputs.transaction_id
-                        
+
                     WHERE transactions_inputs.id > :minId AND transactions_inputs.id <= :maxId
                        AND transactions_outputs.script_public_key_address IS NOT NULL
                     ORDER by transactions_inputs.id
                     ) as distinct_query
-                    
+
                  ON CONFLICT DO NOTHING
-                         RETURNING block_time;""", {"minId": min_id, "maxId": max_id})
+                         RETURNING block_time;"""), {"minId": min_id, "maxId": max_id})
 
             s.commit()
 
@@ -137,18 +138,17 @@ class TxAddrMappingUpdater(object):
 
     def update_outputs(self, min_id: int, max_id: int):
         with session_maker() as s:
-            result = s.execute(f"""
-            
+            result = s.execute(text("""
                 INSERT INTO tx_id_address_mapping (transaction_id, address, block_time)
-                
-                (SELECT sq.*, transactions.block_time FROM (SELECT transaction_id, script_public_key_address                 
+
+                (SELECT sq.*, transactions.block_time FROM (SELECT transaction_id, script_public_key_address
                 FROM transactions_outputs
                 WHERE transactions_outputs.id > :minId and transactions_outputs.id <= :maxId
                 ORDER by transactions_outputs.id DESC) as sq
-				JOIN transactions ON transactions.transaction_id = sq.transaction_id)
-                
+                JOIN transactions ON transactions.transaction_id = sq.transaction_id)
+
                  ON CONFLICT DO NOTHING
-                 RETURNING block_time;""", {"minId": min_id, "maxId": max_id})
+                 RETURNING block_time;"""), {"minId": min_id, "maxId": max_id})
 
             s.commit()
 
