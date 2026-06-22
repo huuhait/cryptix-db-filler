@@ -115,15 +115,19 @@ class BlocksProcessor(object):
 
                 # Add transactions output
                 for index, out in enumerate(transaction.get("outputs", [])):
+                    # Some outputs (e.g. non-standard / token / smart-contract scripts such as
+                    # the "CLV1" marker outputs) carry no verboseData because the script does
+                    # not decode to an address. Treat those as addressless instead of crashing.
+                    out_verbose = out.get("verboseData") or {}
                     self.txs_output.append(TransactionOutput(transaction_id=transaction["verboseData"]["transactionId"],
                                                              index=index,
                                                              amount=out["amount"],
                                                              script_public_key=out["scriptPublicKey"][
                                                                  "scriptPublicKey"],
-                                                             script_public_key_address=out["verboseData"][
-                                                                 "scriptPublicKeyAddress"],
-                                                             script_public_key_type=out["verboseData"][
-                                                                 "scriptPublicKeyType"]))
+                                                             script_public_key_address=out_verbose.get(
+                                                                 "scriptPublicKeyAddress"),
+                                                             script_public_key_type=out_verbose.get(
+                                                                 "scriptPublicKeyType")))
                 # Add transactions input
                 for index, tx_in in enumerate(transaction.get("inputs", [])):
                     self.txs_input.append(TransactionInput(transaction_id=transaction["verboseData"]["transactionId"],
