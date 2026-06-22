@@ -106,12 +106,17 @@ class BlocksProcessor(object):
             if not self.is_tx_id_in_queue(transaction["verboseData"]["transactionId"]):
                 # Add transaction
 
-                self.txs[tx_id] = Transaction(subnetwork_id=transaction["subnetworkId"],
-                                              transaction_id=transaction["verboseData"]["transactionId"],
-                                              hash=transaction["verboseData"]["hash"],
-                                              mass=transaction["verboseData"].get("mass"),
-                                              block_hash=[transaction["verboseData"]["blockHash"]],
-                                              block_time=int(transaction["verboseData"]["blockTime"]))
+                # gRPC proto3 JSON omits any field set to its default (empty string, 0, false),
+                # so coinbase (subnetwork 01) / non-standard (subnetwork 03) txs may be missing
+                # scalar keys such as signatureScript, sigOpCount or previousOutpoint.index.
+                # Use .get() throughout so a missing/default field becomes NULL/0 instead of crashing.
+                tx_verbose = transaction.get("verboseData") or {}
+                self.txs[tx_id] = Transaction(subnetwork_id=transaction.get("subnetworkId"),
+                                              transaction_id=tx_verbose["transactionId"],
+                                              hash=tx_verbose.get("hash"),
+                                              mass=tx_verbose.get("mass"),
+                                              block_hash=[tx_verbose.get("blockHash")],
+                                              block_time=int(tx_verbose.get("blockTime", 0) or 0))
 
                 # Add transactions output
                 for index, out in enumerate(transaction.get("outputs", [])):
@@ -119,25 +124,24 @@ class BlocksProcessor(object):
                     # the "CLV1" marker outputs) carry no verboseData because the script does
                     # not decode to an address. Treat those as addressless instead of crashing.
                     out_verbose = out.get("verboseData") or {}
-                    self.txs_output.append(TransactionOutput(transaction_id=transaction["verboseData"]["transactionId"],
+                    self.txs_output.append(TransactionOutput(transaction_id=tx_verbose["transactionId"],
                                                              index=index,
-                                                             amount=out["amount"],
-                                                             script_public_key=out["scriptPublicKey"][
-                                                                 "scriptPublicKey"],
+                                                             amount=out.get("amount", 0),
+                                                             script_public_key=(out.get("scriptPublicKey") or {}).get(
+                                                                 "scriptPublicKey"),
                                                              script_public_key_address=out_verbose.get(
                                                                  "scriptPublicKeyAddress"),
                                                              script_public_key_type=out_verbose.get(
                                                                  "scriptPublicKeyType")))
                 # Add transactions input
                 for index, tx_in in enumerate(transaction.get("inputs", [])):
-                    self.txs_input.append(TransactionInput(transaction_id=transaction["verboseData"]["transactionId"],
+                    prev_outpoint = tx_in.get("previousOutpoint") or {}
+                    self.txs_input.append(TransactionInput(transaction_id=tx_verbose["transactionId"],
                                                            index=index,
-                                                           previous_outpoint_hash=tx_in["previousOutpoint"][
-                                                               "transactionId"],
-                                                           previous_outpoint_index=int(tx_in["previousOutpoint"].get(
-                                                               "index", 0)),
-                                                           signature_script=tx_in["signatureScript"],
-                                                           sig_op_count=tx_in["sigOpCount"]))
+                                                           previous_outpoint_hash=prev_outpoint.get("transactionId"),
+                                                           previous_outpoint_index=int(prev_outpoint.get("index", 0) or 0),
+                                                           signature_script=tx_in.get("signatureScript"),
+                                                           sig_op_count=int(tx_in.get("sigOpCount", 0) or 0)))
             else:
                 # If the block if already in the Queue, merge the block_hashes.
                 self.txs[tx_id].block_hash = list(set(self.txs[tx_id].block_hash + [block_hash]))
